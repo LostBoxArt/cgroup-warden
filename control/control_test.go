@@ -81,7 +81,11 @@ func TestControlHandlerRejectsNonUserUnits(t *testing.T) {
 			t.Errorf("unit %q: response is not JSON: %v", unit, err)
 			continue
 		}
-		if want := validateUnit(unit).Error(); response.Error != want {
+		want := ""
+		if validationErr := validateUnit(unit); validationErr != nil {
+			want = validationErr.Error()
+		}
+		if response.Error != want {
 			t.Errorf("unit %q: error = %q, want %q", unit, response.Error, want)
 		}
 	}
