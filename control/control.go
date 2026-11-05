@@ -218,7 +218,21 @@ func transform(controlProp controlProperty) (systemd.Property, error) {
 			return property, errors.New("invalid type for property, expected bool")
 		}
 		property.Value = dbus.MakeVariant(val)
-	case CPUQuotaPerSecUSec, MemoryMax, MemoryHigh, MemoryMin, MemoryLow, MemorySwapMax:
+	case CPUQuotaPerSecUSec:
+		val, ok := controlProp.Value.(float64) // json type
+		if !ok {
+			return property, errors.New("invalid type for property, expected float64")
+		}
+
+		if val < 0 {
+			// UINT64_MAX is systemd's representation of "infinity", which
+			// removes the quota. A plain uint64(-1.0) conversion is
+			// implementation-defined and leaves the old quota in place.
+			property.Value = dbus.MakeVariant(^uint64(0))
+		} else {
+			property.Value = dbus.MakeVariant(uint64(val))
+		}
+	case MemoryMax, MemoryHigh, MemoryMin, MemoryLow, MemorySwapMax:
 		val, ok := controlProp.Value.(float64) // json type
 		if !ok {
 			return property, errors.New("invalid type for property, expected float64")
