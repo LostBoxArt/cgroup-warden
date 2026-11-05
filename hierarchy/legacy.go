@@ -19,7 +19,7 @@ type Legacy struct {
 	Root string
 }
 
-func (l *Legacy) SetMemoryLimits(unit string, limit int64) (int64, error) {
+func (l *Legacy) SetMemoryLimits(unit string, limit int64, runtime bool) (int64, error) {
 	cgroup := path.Join(l.Root, unit)
 
 	ctx := context.Background()
@@ -41,11 +41,11 @@ func (l *Legacy) SetMemoryLimits(unit string, limit int64) (int64, error) {
 	}
 
 	newLimit := max(limit, int64(stat.Memory.Swap.Usage+LimitBuffer))
-	
+
 	newMaxLimit := dbus.MakeVariant(uint64(newLimit))
 	memoryMax := systemd.Property{Name: `MemoryMax`, Value: newMaxLimit}
 
-	err = conn.SetUnitPropertiesContext(ctx, unit, false, memoryMax)
+	err = conn.SetUnitPropertiesContext(ctx, unit, runtime, memoryMax)
 
 	if err != nil {
 		return -1, err
@@ -53,7 +53,7 @@ func (l *Legacy) SetMemoryLimits(unit string, limit int64) (int64, error) {
 
 	resources := &specs.LinuxResources{
 		Memory: &specs.LinuxMemory{
-			Swap:  &newLimit,
+			Swap: &newLimit,
 		},
 	}
 
@@ -63,6 +63,24 @@ func (l *Legacy) SetMemoryLimits(unit string, limit int64) (int64, error) {
 	}
 
 	return newLimit, err
+}
+
+func (l *Legacy) SetSwapLimit(unit string, limit int64, runtime bool) (int64, error) {
+	cgroup := path.Join(l.Root, unit)
+	manager, err := cgroup1.Load(cgroup1.StaticPath(cgroup), cgroup1.WithHierarchy(subsystem))
+	if err != nil {
+		return -1, err
+	}
+
+	resources := &specs.LinuxResources{
+		Memory: &specs.LinuxMemory{
+			Swap: &limit,
+		},
+	}
+	if err := manager.Update(resources); err != nil {
+		return -1, err
+	}
+	return limit, nil
 }
 
 func (l *Legacy) GetGroupsWithPIDs() (map[string]map[uint64]bool, error) {

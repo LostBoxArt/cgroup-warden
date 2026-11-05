@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 
@@ -20,6 +21,7 @@ type Config struct {
 	MetaMetrics   bool    `env:"META_METRICS" envDefault:"true"`
 	LogLevel      string  `env:"LOG_LEVEL" envDefault:"info"`
 	SwapRatio     float64 `env:"SWAP_RATIO" envDefault:"0.1"`
+	MinUID        int     `env:"MIN_UID" envDefault:"1000"`
 }
 
 func NewConfig() (*Config, error) {
@@ -58,12 +60,15 @@ func NewConfig() (*Config, error) {
 		return nil, fmt.Errorf("Invalid log level. Options include %v", levels)
 	}
 
-	if c.SwapRatio < 0 {
-		return nil, fmt.Errorf("Invalid swap ratio %f. Cannot be negative", c.SwapRatio)
+	if c.SwapRatio < 0 || c.SwapRatio > 1 || math.IsNaN(c.SwapRatio) || math.IsInf(c.SwapRatio, 0) {
+		return nil, fmt.Errorf("Invalid swap ratio %f. Must be between 0 and 1", c.SwapRatio)
+	}
+
+	if c.MinUID < 0 {
+		return nil, fmt.Errorf("Invalid minimum uid %d. Cannot be negative", c.MinUID)
 	}
 
 	hierarchy.SwapRatio = c.SwapRatio
-
 
 	return &c, err
 }

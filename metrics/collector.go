@@ -84,23 +84,34 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 				return
 			}
 
-			ch <- prometheus.MustNewConstMetric(c.memoryUsage, prometheus.GaugeValue, float64(info.MemoryUsage), cg, info.Username)
 			ch <- prometheus.MustNewConstMetric(c.cpuUsage, prometheus.CounterValue, info.CPUUsage, cg, info.Username)
 			ch <- prometheus.MustNewConstMetric(c.memoryMax, prometheus.GaugeValue, negativeOneIfMax(info.MemoryMax), cg, info.Username)
 			ch <- prometheus.MustNewConstMetric(c.cpuQuota, prometheus.CounterValue, float64(info.CPUQuota), cg, info.Username)
 
-			procs, err := ProcessInfo(cg, pids)
-			if err != nil {
-				slog.Warn("unable to collect process info", "cgroup", cg, "err", err)
-				return
+			// Report the sum of process PSS rather than memory.current:
+			// memory.current includes reclaimable page cache, which users do not
+			// control and which stays charged after a process exits.
+			procs, procErr := ProcessInfo(cg, pids)
+			if procErr != nil {
+				slog.Warn("unable to collect process info", "cgroup", cg, "err", procErr)
 			}
 
-			for name, p := range procs {
-				ch <- prometheus.MustNewConstMetric(c.procCPU, prometheus.CounterValue, float64(p.cpuSecondsTotal), cg, info.Username, name)
-				ch <- prometheus.MustNewConstMetric(c.procMemory, prometheus.GaugeValue, float64(p.memoryBytesTotal), cg, info.Username, name)
-				ch <- prometheus.MustNewConstMetric(c.procPSS, prometheus.GaugeValue, float64(p.memoryPSSTotal), cg, info.Username, name)
-				ch <- prometheus.MustNewConstMetric(c.procCount, prometheus.GaugeValue, float64(p.count), cg, info.Username, name)
+			var totalPSS uint64
+			if procErr == nil {
+				for name, p := range procs {
+					totalPSS += p.memoryPSSTotal
+					ch <- prometheus.MustNewConstMetric(c.procCPU, prometheus.CounterValue, float64(p.cpuSecondsTotal), cg, info.Username, name)
+					ch <- prometheus.MustNewConstMetric(c.procMemory, prometheus.GaugeValue, float64(p.memoryBytesTotal), cg, info.Username, name)
+					ch <- prometheus.MustNewConstMetric(c.procPSS, prometheus.GaugeValue, float64(p.memoryPSSTotal), cg, info.Username, name)
+					ch <- prometheus.MustNewConstMetric(c.procCount, prometheus.GaugeValue, float64(p.count), cg, info.Username, name)
+				}
 			}
+
+			memoryUsage := float64(info.MemoryUsage)
+			if procErr == nil {
+				memoryUsage = float64(totalPSS)
+			}
+			ch <- prometheus.MustNewConstMetric(c.memoryUsage, prometheus.GaugeValue, memoryUsage, cg, info.Username)
 		}()
 	}
 	wg.Wait()

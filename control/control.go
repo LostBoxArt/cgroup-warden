@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strconv"
 
 	"github.com/chpc-uofu/cgroup-warden/hierarchy"
 	//"github.com/containerd/cgroups/v3"
@@ -17,11 +18,34 @@ import (
 
 // userSlicePattern restricts /control to per-user slices. Anything else,
 // including "" (which systemd resolves to the caller's own unit), is rejected.
-var userSlicePattern = regexp.MustCompile(`^user-[0-9]+\.slice$`)
+var userSlicePattern = regexp.MustCompile(`^user-([0-9]+)\.slice$`)
+
+var allowedProperties = map[string]bool{
+	CPUAccounting:      true,
+	CPUQuotaPerSecUSec: true,
+	MemoryAccounting:   true,
+	MemoryMax:          true,
+	MemorySwapMax:      true,
+}
 
 func validateUnit(unit string) error {
 	if !userSlicePattern.MatchString(unit) {
 		return fmt.Errorf("unit must be a per-user slice such as user-1000.slice, got %q", unit)
+	}
+	return nil
+}
+
+func unitUID(unit string) (int, error) {
+	match := userSlicePattern.FindStringSubmatch(unit)
+	if len(match) != 2 {
+		return 0, fmt.Errorf("cannot determine uid from %q", unit)
+	}
+	return strconv.Atoi(match[1])
+}
+
+func validateProperty(name string) error {
+	if !allowedProperties[name] {
+		return fmt.Errorf("property is not allowed: %q", name)
 	}
 	return nil
 }
@@ -56,10 +80,9 @@ type controlResponse struct {
 	Warning  string          `json:"warning,omitempty"`
 }
 
-func ControlHandler(cgroupRoot string) http.HandlerFunc {
+func ControlHandler(cgroupRoot string, minUID int) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
 		var err error
 		var response controlResponse
@@ -91,6 +114,19 @@ func ControlHandler(cgroupRoot string) http.HandlerFunc {
 			return
 		}
 
+		if uid, _ := unitUID(request.Unit); uid < minUID {
+			err = fmt.Errorf("unit uid %d is below the configured minimum %d", uid, minUID)
+			slog.Warn("rejected control request", "unit", request.Unit, "address", r.RemoteAddr, "err", err.Error())
+			status = http.StatusBadRequest
+			return
+		}
+
+		if err = validateProperty(request.Property.Name); err != nil {
+			slog.Warn("rejected control request", "unit", request.Unit, "address", r.RemoteAddr, "err", err.Error())
+			status = http.StatusBadRequest
+			return
+		}
+
 		slog.Debug("Decoded request", "unit", request.Unit, "property", request.Property.Name, "value", request.Property.Value)
 
 		var newLimit int64
@@ -106,7 +142,7 @@ func ControlHandler(cgroupRoot string) http.HandlerFunc {
 			}
 
 			if fallback {
-				response.Warning = fmt.Sprintf("unable to clamp memory limit down, defaulted to current usage %d", newLimit)
+				response.Warning = fmt.Sprintf("memory limit raised to current usage plus buffer: %d", newLimit)
 			}
 		} else {
 			err = setSystemdProperty(request)
@@ -131,8 +167,12 @@ func setCGroupMemoryLimits(request controlRequest, cgroupRoot string) (int64, bo
 	}
 
 	h := hierarchy.NewHierarchy(cgroupRoot)
-	newLimit, err := h.SetMemoryLimits(request.Unit, value)
+	if request.Property.Name == MemorySwapMax {
+		newLimit, err := h.SetSwapLimit(request.Unit, value, request.Runtime)
+		return newLimit, false, err
+	}
 
+	newLimit, err := h.SetMemoryLimits(request.Unit, value, request.Runtime)
 	fallback := (newLimit != value && newLimit != -1)
 
 	return newLimit, fallback, err

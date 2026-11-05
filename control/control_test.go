@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -43,7 +44,7 @@ func TestValidateUnit(t *testing.T) {
 }
 
 func TestControlHandlerRejectsNonUserUnits(t *testing.T) {
-	handler := ControlHandler("/user.slice")
+	handler := ControlHandler("/user.slice", 1000)
 
 	for _, unit := range []string{
 		"",
@@ -83,5 +84,63 @@ func TestControlHandlerRejectsNonUserUnits(t *testing.T) {
 		if want := validateUnit(unit).Error(); response.Error != want {
 			t.Errorf("unit %q: error = %q, want %q", unit, response.Error, want)
 		}
+	}
+}
+
+func TestControlHandlerRejectsBelowMinUID(t *testing.T) {
+	handler := ControlHandler("/user.slice", 1000)
+	body, err := json.Marshal(controlRequest{
+		Unit: "user-0.slice",
+		Property: controlProperty{
+			Name:  "CPUQuotaPerSecUSec",
+			Value: "x",
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/control", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	var response controlResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("response is not JSON: %v", err)
+	}
+	if !strings.Contains(response.Error, "below the configured minimum") {
+		t.Errorf("error = %q, want a minimum-uid error", response.Error)
+	}
+}
+
+func TestControlHandlerRejectsDisallowedProperty(t *testing.T) {
+	handler := ControlHandler("/user.slice", 1000)
+	body, err := json.Marshal(controlRequest{
+		Unit: "user-1000.slice",
+		Property: controlProperty{
+			Name:  "MemoryHigh",
+			Value: 1,
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/control", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	var response controlResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("response is not JSON: %v", err)
+	}
+	if !strings.Contains(response.Error, "property is not allowed") {
+		t.Errorf("error = %q, want a property-allowlist error", response.Error)
 	}
 }

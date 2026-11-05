@@ -20,7 +20,7 @@ type Unified struct {
 
 var SwapRatio float64 = 0.1
 
-func (u *Unified) SetMemoryLimits(unit string, limit int64) (int64, error) {
+func (u *Unified) SetMemoryLimits(unit string, limit int64, runtime bool) (int64, error) {
 	ctx := context.Background()
 	conn, err := systemd.NewSystemConnectionContext(ctx)
 	if err != nil {
@@ -39,19 +39,39 @@ func (u *Unified) SetMemoryLimits(unit string, limit int64) (int64, error) {
 		return -1, err
 	}
 
-	newMax := max(limit, int64(stat.Memory.Usage+LimitBuffer))
-	newSwap := int64(float64(limit) * SwapRatio)
+	newMax := limit
+	newSwap := limit
+	if limit != MaxCGroupMemoryLimit {
+		newMax = max(limit, int64(stat.Memory.Usage+LimitBuffer))
+		newSwap = int64(float64(newMax) * SwapRatio)
+	}
 
 	memoryMax := systemd.Property{Name: `MemoryMax`, Value: dbus.MakeVariant(uint64(newMax))}
 	memorySwapMax := systemd.Property{Name: `MemorySwapMax`, Value: dbus.MakeVariant(uint64(newSwap))}
 
-	err = conn.SetUnitPropertiesContext(ctx, unit, false, memoryMax, memorySwapMax)
+	err = conn.SetUnitPropertiesContext(ctx, unit, runtime, memoryMax, memorySwapMax)
 
 	if err != nil {
 		return -1, err
 	}
 
 	return newMax, err
+}
+
+func (u *Unified) SetSwapLimit(unit string, limit int64, runtime bool) (int64, error) {
+	ctx := context.Background()
+	conn, err := systemd.NewSystemConnectionContext(ctx)
+	if err != nil {
+		slog.Warn("unable to connect to systemd", "err", err.Error())
+		return -1, err
+	}
+	defer conn.Close()
+
+	swapMax := systemd.Property{Name: `MemorySwapMax`, Value: dbus.MakeVariant(uint64(limit))}
+	if err := conn.SetUnitPropertiesContext(ctx, unit, runtime, swapMax); err != nil {
+		return -1, err
+	}
+	return limit, nil
 }
 
 func (u *Unified) GetGroupsWithPIDs() (map[string]map[uint64]bool, error) {
