@@ -22,6 +22,7 @@ type Config struct {
 	LogLevel      string  `env:"LOG_LEVEL" envDefault:"info"`
 	SwapRatio     float64 `env:"SWAP_RATIO" envDefault:"0.1"`
 	MinUID        int     `env:"MIN_UID" envDefault:"1000"`
+	MaxUID        int     `env:"MAX_UID" envDefault:"0"`
 }
 
 func NewConfig() (*Config, error) {
@@ -66,6 +67,14 @@ func NewConfig() (*Config, error) {
 
 	if c.MinUID < 0 {
 		return nil, fmt.Errorf("Invalid minimum uid %d. Cannot be negative", c.MinUID)
+	}
+
+	if c.MaxUID < 0 {
+		return nil, fmt.Errorf("Invalid maximum uid %d. Cannot be negative", c.MaxUID)
+	}
+
+	if c.MaxUID > 0 && c.MaxUID < c.MinUID {
+		return nil, fmt.Errorf("Invalid maximum uid %d. Must be >= minimum uid %d", c.MaxUID, c.MinUID)
 	}
 
 	hierarchy.SwapRatio = c.SwapRatio

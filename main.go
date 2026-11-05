@@ -51,14 +51,14 @@ func main() {
 
 	if conf.InsecureMode {
 		mux.Handle("/metrics", metrics.MetricsHandler(conf.RootCGroup, conf.MetaMetrics))
-		mux.Handle("/control", control.ControlHandler(conf.RootCGroup, conf.MinUID))
+		mux.Handle("/control", control.ControlHandler(conf.RootCGroup, conf.MinUID, conf.MaxUID))
 		slog.Info("Starting server!")
 		slog.Error("server error", "err", http.ListenAndServe(conf.ListenAddress, mux))
 		os.Exit(1)
 
 	} else {
 		mux.Handle("/metrics", authorize(metrics.MetricsHandler(conf.RootCGroup, conf.MetaMetrics), conf.BearerToken))
-		mux.Handle("/control", authorize(control.ControlHandler(conf.RootCGroup, conf.MinUID), conf.BearerToken))
+		mux.Handle("/control", authorize(control.ControlHandler(conf.RootCGroup, conf.MinUID, conf.MaxUID), conf.BearerToken))
 		slog.Info("Starting server")
 		slog.Error("server error", "err", http.ListenAndServeTLS(conf.ListenAddress, conf.Certificate, conf.PrivateKey, mux))
 		os.Exit(1)

@@ -44,7 +44,7 @@ func TestValidateUnit(t *testing.T) {
 }
 
 func TestControlHandlerRejectsNonUserUnits(t *testing.T) {
-	handler := ControlHandler("/user.slice", 1000)
+	handler := ControlHandler("/user.slice", 1000, 0)
 
 	for _, unit := range []string{
 		"",
@@ -88,7 +88,7 @@ func TestControlHandlerRejectsNonUserUnits(t *testing.T) {
 }
 
 func TestControlHandlerRejectsBelowMinUID(t *testing.T) {
-	handler := ControlHandler("/user.slice", 1000)
+	handler := ControlHandler("/user.slice", 1000, 0)
 	body, err := json.Marshal(controlRequest{
 		Unit: "user-0.slice",
 		Property: controlProperty{
@@ -117,7 +117,7 @@ func TestControlHandlerRejectsBelowMinUID(t *testing.T) {
 }
 
 func TestControlHandlerRejectsDisallowedProperty(t *testing.T) {
-	handler := ControlHandler("/user.slice", 1000)
+	handler := ControlHandler("/user.slice", 1000, 0)
 	body, err := json.Marshal(controlRequest{
 		Unit: "user-1000.slice",
 		Property: controlProperty{
@@ -142,5 +142,35 @@ func TestControlHandlerRejectsDisallowedProperty(t *testing.T) {
 	}
 	if !strings.Contains(response.Error, "property is not allowed") {
 		t.Errorf("error = %q, want a property-allowlist error", response.Error)
+	}
+}
+
+
+func TestControlHandlerRejectsAboveMaxUID(t *testing.T) {
+	handler := ControlHandler("/user.slice", 1000, 2000)
+	body, err := json.Marshal(controlRequest{
+		Unit: "user-2001.slice",
+		Property: controlProperty{
+			Name:  "CPUQuotaPerSecUSec",
+			Value: -1,
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/control", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	var response controlResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("response is not JSON: %v", err)
+	}
+	if !strings.Contains(response.Error, "above the configured maximum") {
+		t.Errorf("error = %q, want a maximum-uid error", response.Error)
 	}
 }

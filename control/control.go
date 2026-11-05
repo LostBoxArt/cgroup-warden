@@ -80,7 +80,7 @@ type controlResponse struct {
 	Warning  string          `json:"warning,omitempty"`
 }
 
-func ControlHandler(cgroupRoot string, minUID int) http.HandlerFunc {
+func ControlHandler(cgroupRoot string, minUID, maxUID int) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
@@ -116,6 +116,13 @@ func ControlHandler(cgroupRoot string, minUID int) http.HandlerFunc {
 
 		if uid, _ := unitUID(request.Unit); uid < minUID {
 			err = fmt.Errorf("unit uid %d is below the configured minimum %d", uid, minUID)
+			slog.Warn("rejected control request", "unit", request.Unit, "address", r.RemoteAddr, "err", err.Error())
+			status = http.StatusBadRequest
+			return
+		}
+
+		if uid, _ := unitUID(request.Unit); maxUID > 0 && uid > maxUID {
+			err = fmt.Errorf("unit uid %d is above the configured maximum %d", uid, maxUID)
 			slog.Warn("rejected control request", "unit", request.Unit, "address", r.RemoteAddr, "err", err.Error())
 			status = http.StatusBadRequest
 			return
